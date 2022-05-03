@@ -137,8 +137,12 @@ redump_dats = {}
 
 
 USER_CONFIG_DIR = user_config_dir(user_data_dir(appname, appauthor))
-
+print(USER_CONFIG_DIR)
 TEMP_PATH = tempfile.mkdtemp()
+
+
+progress = ['Ooo','oOo','ooO','oOo']
+i = 0
 
 if not os.path.exists(os.path.join(USER_CONFIG_DIR, 'dat')):
     os.makedirs(os.path.join(USER_CONFIG_DIR, 'dat'))
@@ -156,7 +160,9 @@ def log(type, game, item, msg):
 # Download redump.org datfiles and cuesheets
 for system in redump_source:
     if not os.path.exists(os.path.join(USER_CONFIG_DIR, 'dat', system + ".dat")):
-        print('Downloading redump.org dat data for {}...'.format(system))
+        print("~~ Downloading datfiles [{}]   ~~".format(progress[i]), end='\r', flush=True)
+        i = i+1 if i+1 < len(progress) else 0
+        #print('Downloading redump.org dat data for {}...'.format(system))
         log('INFO', 'CONFIG', 'DAT', 'Downloading redump.org dat data for {}...'.format(system))
         temp_dat_dir = os.path.join(TEMP_PATH, appname, 'dat', system)
         os.makedirs(temp_dat_dir)
@@ -270,9 +276,10 @@ def read_redump_file(dat_file, system_name=None):
 
         
 # Read redump.org dats
-print("~~ Loading datfiles...          ~~")
 for (dirpath, dirnames, filenames) in os.walk(os.path.join(USER_CONFIG_DIR, 'dat')):
     for file_name in filenames:
+        print("~~ Loading datfiles [{}]       ~~".format(progress[i]), end='\r', flush=True)
+        i = i+1 if i+1 < len(progress) else 0
         system_name = file_name[:-4]
         abbrv=None
         abbrv=[abbreviations for abbreviations in system_abbreviations if system_abbreviations[abbreviations] == system_name]
@@ -301,8 +308,16 @@ def hash_file(file_name):
     BUF_SIZE = 65536
     md5 = hashlib.md5()
     sha1 = hashlib.sha1()
+    ttime = time.time()
+    i=0
+    print("Hashing file - {} [{}]".format(file_name, progress[i]), end='\r', flush=True)
+    i = i+1 if i+1 < len(progress) else 0
     with open(file_name, 'rb') as f:
         while True:
+            if time.time() - ttime > 1:
+                print("Hashing file - {} [{}]".format(file_name, progress[i]), end='\r', flush=True)
+                i = i+1 if i+1 < len(progress) else 0
+                ttime = time.time()
             data = f.read(BUF_SIZE)
             if not data:
                 break
@@ -334,19 +349,16 @@ def check_roms(roms_folder, dat_list, allowed_extensions, sha1_list, recursive =
                     if file[-4:] in allowed_extensions:
                         game_name = re.sub(' \(Track [0-9]{1,3}\)', '', file)
                         rom_list.append(os.path.join(dirpath, file))
-
-
         # Check file hashes of known files
         print("Checking Files:")
         LJUST = max([len(a) for a in rom_list])
         # Hashing Files
         for rom_file in rom_list:
-            print('Hashing file - {}'.format(rom_file.ljust(LJUST)), end = '', flush=True)
             (md5, sha1) = hash_file(rom_file)
             log('INFO', 'HASHING', 'ROM', 'Hashing file - {} - SHA1: {}'.format(rom_file, sha1))
+            print('Hashing file - {}'.format(rom_file.ljust(LJUST)), end = '', flush=True)
             print(' - SHA1: {}'.format(sha1))
             sha1_rom_list[rom_file] = sha1
-
         # Match files to games
         matched_games = []
         for game_name in dat_list.entries:
@@ -365,21 +377,27 @@ def check_roms(roms_folder, dat_list, allowed_extensions, sha1_list, recursive =
                 if game.game_rom_sha1[sha1].name != os.path.basename(game.matched_rom_sha1[sha1]):
                     game.filename_missmatched = True
                     game.filename_missmatched_sha1.append(sha1)
-                    
 
         complete_games = [game for game in matched_games if game.complete]
         incomplete_games = [game for game in matched_games if not game.complete]
-
         print()
         print('Complete Games:')
-
         sha1_complete = []
-
+        # Sort games by category
+        categories_complete = {}
         for game in complete_games:
-            print ('- {} ({})'.format(game.name, 'Warning' if  game.filename_missmatched else 'Ok'))
-            if game.filename_missmatched:
-                [print('   * Filename missmatch, DAT Entry: \'{}\', Local File: \'{}\''.format(game.game_rom_sha1[sha1].name, game.matched_rom_sha1[sha1])) for sha1 in game.filename_missmatched_sha1]
-            sha1_complete += [rom.sha1 for rom in game.roms.values()]
+            if categories_complete.get(game.system) is None:
+                categories_complete[game.system] = []
+            categories_complete[game.system].append(game)
+        pad_c = max([len(category) for category in categories_complete])
+        # Show complete games by system
+        for category in categories_complete:
+            print('--- {}---'.format(category + " " + "".ljust(pad_c-len(category), '-')))
+            for game in categories_complete[category]:
+                print('  {} ({})'.format(game.name, 'Warning' if  game.filename_missmatched else 'Ok'))
+                if game.filename_missmatched:
+                    [print('   * Filename missmatch, DAT Entry: \'{}\', Local File: \'{}\''.format(game.game_rom_sha1[sha1].name, game.matched_rom_sha1[sha1])) for sha1 in game.filename_missmatched_sha1]
+                sha1_complete += [rom.sha1 for rom in game.roms.values()]
 
         # Remove false positive incomplete entries from the complete list
         remove_incomplete_games = []
@@ -390,10 +408,21 @@ def check_roms(roms_folder, dat_list, allowed_extensions, sha1_list, recursive =
         incomplete_games = [ game for game in incomplete_games if game not in remove_incomplete_games]
 
         if len(incomplete_games) > 0:
+            categories_incomplete = {}
+            for game in incomplete_games:
+                if categories_incomplete.get(game.system) is None:
+                    categories_incomplete[game.system] = []
+                categories_incomplete[game.system].append(game)
+            pad_i = max([len(category) for category in categories_incomplete])
+            pad_i = pad_i if pad_i > pad_c else pad_c
             print()
             print('Incomplete Games (Might include false positives):')
-            for game in incomplete_games:
-                print ('- {} ({})'.format(game.name, game.complete))
+            # Show incomplete games by system
+            for category in categories_incomplete:
+                print('--- {}---'.format(category + " " + "".ljust(pad_i-len(category), '-')))
+                for game in categories_incomplete[category]:
+                    print ('- {} ({})'.format(game.name, game.complete))
+        print('----{}---'.format("".ljust(pad_c, '-')))
         return complete_games, incomplete_games
     except:
         raise
@@ -416,7 +445,14 @@ def check(roms_folder, dat_file):
     elif dat_file is not None and dat_file.endswith('.cue'):
         dat_list, allowed_extensions, sha1_list = read_redump_file(dat_file)
         check_cmd = {'dat_list': dat_list, 'allowed_extensions': allowed_extensions, 'sha1_list': sha1_list, 'roms_folder': roms_folder}
-    #else:
+    else:
+        mixed = RedumpDat('Mixed','Mixed')
+        for redump_dat in redump_dats.values():
+            games = [game for game in redump_dat['dat_list'].entries.values()]
+            for game in games:
+                game.name += "({})".format(game.system)
+                mixed.AddGame(game)
+        check_cmd = {'dat_list': mixed, 'allowed_extensions': mixed.allowed_extensions, 'sha1_list': mixed.sha1_list, 'roms_folder': roms_folder}
     check_roms(**check_cmd)
 
 def help(exit_val):
@@ -470,5 +506,4 @@ for arg in CMD_ARG:
     if i < len(aargv):
         CMD_ARG[arg] = aargv[i]
         i+=1
-print (CMD_ARG)
 CMD[sys.argv[1]](**CMD_ARG)
