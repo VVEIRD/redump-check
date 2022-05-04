@@ -137,7 +137,7 @@ redump_dats = {}
 
 
 USER_CONFIG_DIR = user_config_dir(user_data_dir(appname, appauthor))
-print(USER_CONFIG_DIR)
+
 TEMP_PATH = tempfile.mkdtemp()
 
 
@@ -394,10 +394,12 @@ def check_roms(roms_folder, dat_list, allowed_extensions, sha1_list, recursive =
         for category in categories_complete:
             print('--- {}---'.format(category + " " + "".ljust(pad_c-len(category), '-')))
             for game in categories_complete[category]:
-                print('  {} ({})'.format(game.name, 'Warning' if  game.filename_missmatched else 'Ok'))
+                print('  {} ({})'.format(game.name.replace("({})".format(game.system), ''), 'Warning' if  game.filename_missmatched else 'Ok'))
+                log('INFO', game.name, 'GAME', 'All file present')
                 if game.filename_missmatched:
                     [print('   * Filename missmatch, DAT Entry: \'{}\', Local File: \'{}\''.format(game.game_rom_sha1[sha1].name, game.matched_rom_sha1[sha1])) for sha1 in game.filename_missmatched_sha1]
                 sha1_complete += [rom.sha1 for rom in game.roms.values()]
+            print()
 
         # Remove false positive incomplete entries from the complete list
         remove_incomplete_games = []
@@ -421,7 +423,8 @@ def check_roms(roms_folder, dat_list, allowed_extensions, sha1_list, recursive =
             for category in categories_incomplete:
                 print('--- {}---'.format(category + " " + "".ljust(pad_i-len(category), '-')))
                 for game in categories_incomplete[category]:
-                    print ('- {} ({})'.format(game.name, game.complete))
+                    print('- {} ({})'.format(game.name.replace("({})".format(game.system), ''), game.complete))
+            print()
         print('----{}---'.format("".ljust(pad_c, '-')))
         return complete_games, incomplete_games
     except:
