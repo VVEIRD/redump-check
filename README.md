@@ -7,7 +7,7 @@ Download a dat file from redump.org, and use it to check a collection:
 
     C:\path\to\script\redump-check D:\path\to\collection "D:\Sony - PlayStation - Datfile (10649) (2022-05-02 09-44-32).dat"
 
-The scripts output will look something like this:
+The scripts output will look something like this (Not up to date anymore):
 
     ~~~ Redump Collection Verifier ~~~
     ~~ Verifies any redump dat      ~~
