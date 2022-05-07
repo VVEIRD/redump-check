@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 import hashlib
 from appdirs import *
 from datetime import datetime
+from collections import OrderedDict
 import urllib.request
 import tempfile
 import shutil
@@ -166,9 +167,21 @@ class RedumpGame:
         self.roms = {}
         self.filename_missmatched_sha1 = []
         self.matched_roms = {}
+        self.matched_rom_sha1 = {}
     def AddRom(self, rom):
         if isinstance(rom, RedumpRom) and rom.name not in self.roms:
             self.roms[rom.name] = rom
+    def GetFileCount(self):
+        return len(self.roms)
+    def GetCueFile(self):
+        cueFile = None
+        for rom in self.roms.values():
+            if rom.GetExt() == '.cue':
+                cueFile = rom
+        return cueFile
+    # Returns full file path of matched rom
+    def GetMatchedRomByHash(self, sha1):
+        return self.matched_rom_sha1.get(sha1)
     
 class RedumpDat:
     def __init__(self, name, internal_name=None, version=None, date=None, author=None, homepage=None, url=None):
@@ -186,15 +199,15 @@ class RedumpDat:
         self.allowed_extensions = []
         self.sha1_list = {}
     def AddRom(self, game_name, rom):
-        if isinstance(rom, RedumpRom) and game_name in self.entries and rom.name not in self.entries[game_name].roms:
+        if isinstance(rom, RedumpRom) and game_name + "({})".format(self.system) in self.entries and rom.name not in self.entries[game_name + "({})".format(self.system)].roms:
             ext = rom.GetExt()
             if ext is not None and ext.strip() != '' and ext not in self.allowed_extensions:
                 self.allowed_extensions.append(ext)
             self.sha1_list[rom.sha1] = {self.header.internal_name, game_name, rom.name}
             self.entries[game_name].roms[rom.name] = rom
     def AddGame(self, game):
-        if isinstance(game, RedumpGame) and game.name not in self.entries:
-            self.entries[game.name] = game
+        if isinstance(game, RedumpGame) and game.name + "({})".format(game.system) not in self.entries:
+            self.entries[game.name + "({})".format(game.system)] = game
             for rom in game.roms.values():
                 ext = rom.GetExt()
                 if ext is not None and ext.strip() != '' and ext not in self.allowed_extensions:
@@ -349,7 +362,9 @@ def hash_file(file_name):
 
 
 
-def check_roms(roms_folder, dat_list, allowed_extensions, sha1_list, recursive = True):
+def check_roms(roms_folder, dat_list, allowed_extensions=None, sha1_list=None, recursive = True):
+    allowed_extensions = dat_list.allowed_extensions
+    sha1_list = dat_list.sha1_list
     try:
         print("~~           Settings           ~~")
         print("~~ Using datfile for system: {}".format(dat_list.header.name))
@@ -424,6 +439,26 @@ def check_roms(roms_folder, dat_list, allowed_extensions, sha1_list, recursive =
 # ~~ CMD Functions
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~ Get the datfile from the given arg
+# ~~ The datfile are either all datfiles
+# ~~ from redump.org, a system
+# ~~ abbreviation or a custom datfile
+# ~~ provided by the user
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Args:
+# - dat_file: Either None for all default
+#             redump datfiles, a system
+#             abbreviation for a default
+#             redump system or a custom
+#             path to a datfile
+# Returns:
+# - A RedumpDat Object containing all
+#   games from all datfiles
+# - A RedumpDat Object of one system
+# - A RedumpDat from the provided custom
+#   datfile
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def get_dat_list(dat_file):
     dat_list = None
     try:
@@ -431,12 +466,12 @@ def get_dat_list(dat_file):
             dat_list = get_redump_dats()[dat_file]['dat_list']
         elif dat_file is not None:
             dat_list, allowed_extensions, sha1_list = read_redump_file(dat_file)
-        else:
+        elif dat_file is None or dat_file == 'all':
             mixed = RedumpDat('Mixed','Mixed')
             for redump_dat in get_redump_dats().values():
                 games = [game for game in redump_dat['dat_list'].entries.values()]
                 for game in games:
-                    game.name += "({})".format(game.system)
+                    # game.name += "({})".format(game.system)
                     mixed.AddGame(game)
             dat_list = mixed
     except Exception as e:
@@ -508,16 +543,24 @@ def check(roms_folder, dat_file):
         print()
     print('----{}---'.format("".ljust(pad_c, '-')))
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~ Lists all available systems for
+# ~~ which there are datfiles
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def list():
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     print("~~ List of avalable systems     ~~")
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     pad = max([len(system) for system in system_abbreviations])
+    print(" {} - {}".format(('all').ljust(pad), 'All of the systems below'))
     for system in system_abbreviations:
         print(" {} - {}".format((system).ljust(pad), system_abbreviations[system]))
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~ Shows program help
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def help(exit_val):
     print('~~~ Help  ~~~')
     print('Use one of the  following arguments to use this tool:')
@@ -543,16 +586,97 @@ def help(exit_val):
     print('  Only complete Games will be reorganized. Use redump check first to see which')
     print('  games will be affected.')
     print()
-    print('  redump reorg /path/to/collection [psx|/path/to/datfile/psx.dat]')
+    print('  redump reorg /path/to/collection /path/to/target/collection [psx|/path/to/datfile/psx.dat]')
     print('')
-
     exit(exit_val if not isinstance(exit_val, str) else 1)
 
-CMD = {'check': check, 'help': help, 'list': list}
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~ Reorgs all complete and recognised
+# ~~ games in the provided source dir
+# ~~ into the target dir.
+# ~~ Creates sub-directories for system.
+# ~~ Creates m3u file for all found games
+# ~~ - Grups games that only differs
+# ~~   by (Disk *) in m3u file 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Args:
+# - source_folder: Folder to check
+# - target_folder: Folder to reorg found
+#                  games in
+# - dst: Either None for all default
+#             redump datfiles, a system
+#             abbreviation for a default
+#             redump system or a custom
+#             path to a datfile
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def reorg(source_folder, target_folder, dst):
+    dat_list = get_dat_list(dst)
+    if source_folder is None:
+        print("~~~ ERROR ~~~                                                        ")
+        print("Please specifiy a folder to be checked")
+        help(1)
+    if target_folder is None:
+        print("~~~ ERROR ~~~                                                        ")
+        print("Please specifiy target folder (Can be the same as source)")
+        help(1)
+    if dat_list is None:
+        print("~~~ ERROR ~~~                                                        ")
+        print("The given Argument {} is not a valid system abbreviation or valid custom datfile".format(dst))
+        help(1)
+    complete_games, incomplete_games, unknown_roms = check_roms(roms_folder=source_folder, dat_list=dat_list)
+    # Map games to System and group games with multiple disks
+    categories = OrderedDict.fromkeys([game.system for game in complete_games]).keys()
+    categories = {category: {} for category in categories}
+    for game in complete_games:
+        categories[game.system][re.sub('\(Disc [0-9]{1,3}\).*', '', game.name).strip()] = []
+    for game in complete_games:
+        categories[game.system][re.sub('\(Disc [0-9]{1,3}\).*', '', game.name).strip()].append(game)
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+    print("~~ Moving found games           ~~")
+    pad_c = max([len(category) for category in categories])
+    for category in categories:
+        print('--- {}---'.format(category + " " + "".ljust(pad_c-len(category), '-')))
+        if not os.path.isdir(os.path.join(target_folder, category)):
+            os.makedirs(os.path.join(target_folder, category))
+        for game_name in categories[category]:
+            print(' Moving Game {}'.format(game_name))
+            for game in categories[category][game_name]:
+                if not os.path.isdir(os.path.join(target_folder, category, game.name)):
+                    os.makedirs(os.path.join(target_folder, category, game.name))
+                for rom in game.roms.values():
+                    source_file = game.GetMatchedRomByHash(rom.sha1)
+                    target_file = os.path.join(target_folder, category, game.name, rom.name)
+                    print(' * Moving \'{}\' to \'{}\''.format(source_file, target_file))
+                    os.rename(source_file, target_file)
+                    log('INFO', game_name, 'MOVING', 'Moving \'{}\' to \'{}\''.format(source_file, target_file))
+            # Create m3u, TODO
+            m3u_files = []
+            for game in categories[category][game_name]:
+                cue = game.GetCueFile()
+                if cue is not None:
+                    m3u_files.append('/'.join([game.name, cue.name]))
+            if len(m3u_files) == 0:
+                for game in categories[category][game_name]:
+                     for rom in game.roms.values():
+                         m3u_files.append('/'.join([game.name, rom.name]))
+            m3u_files = OrderedDict.fromkeys(m3u_files).keys()
+            log('INFO', game_name, 'M3U', 'Creating M3U Playlist \'{}\''.format(game_name + ".m3u"))
+            print(' * Creating M3U Playlist \'{}\''.format(game_name + ".m3u"))
+            with open(os.path.join(target_folder, category, game_name + ".m3u"), 'w', encoding="utf8") as m3u:
+                m3u.write("#EXTM3U\n")
+                m3u.write("#EXTENC: UTF-8\n")
+                for m3u_file in m3u_files:
+                    m3u.write(m3u_file + "\n")
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+    print('Done')
+
+
+
+CMD = {'check': check, 'help': help, 'list': list, 'reorg': reorg}
 CMD_ARGS = {
     'check': {'roms_folder': None, 'dat_file': None}, 
     'help': {'exit_val': 0},
-    'reorg': {},
+    'reorg': {'source_folder': None, 'target_folder': None, 'dst': None},
     'list': {}
 }
 
