@@ -20,6 +20,12 @@ print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 ERR_LOG="redump-check.err"
 STD_LOG="redump-check.log"
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~ Redump Files
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
 redump_source = { 
     'Acorn Archimedes':                                 {'dat': 'http://redump.org/datfile/arch/',    'cue': 'http://redump.org/cues/arch/'},
     'Apple Macintosh':                                  {'dat': 'http://redump.org/datfile/mac/',     'cue': 'http://redump.org/cues/mac/'},
@@ -133,6 +139,74 @@ system_abbreviations = {
     'nuon':      'VM Labs NUON'
 }
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~ Classes
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+class RedumpRom:
+    def __init__(self, name, crc=None, md5=None, sha1=None):
+        self.name = name
+        self.crc = crc
+        self.md5 = md5
+        self.sha1 = sha1
+    def GetExt(self):
+        filename, file_extension = os.path.splitext(self.name)
+        return file_extension
+
+
+class RedumpGame:
+    def __init__(self, name, category=None, system=None):
+        self.name = name
+        self.category = category
+        self.system = system
+        self.complete = False
+        self.filename_missmatched = False
+        self.roms = {}
+        self.filename_missmatched_sha1 = []
+        self.matched_roms = {}
+    def AddRom(self, rom):
+        if isinstance(rom, RedumpRom) and rom.name not in self.roms:
+            self.roms[rom.name] = rom
+    
+class RedumpDat:
+    def __init__(self, name, internal_name=None, version=None, date=None, author=None, homepage=None, url=None):
+        self.header = type('', (), {})()
+        self.header.name = name
+        self.header = type('', (), {})()
+        self.header.name = name
+        self.header.internal_name = internal_name if internal_name is not None else name
+        self.header.version = version
+        self.header.date = date
+        self.header.author = author
+        self.header.homepage = homepage
+        self.header.url = url
+        self.entries = {}
+        self.allowed_extensions = []
+        self.sha1_list = {}
+    def AddRom(self, game_name, rom):
+        if isinstance(rom, RedumpRom) and game_name in self.entries and rom.name not in self.entries[game_name].roms:
+            ext = rom.GetExt()
+            if ext is not None and ext.strip() != '' and ext not in self.allowed_extensions:
+                self.allowed_extensions.append(ext)
+            self.sha1_list[rom.sha1] = {self.header.internal_name, game_name, rom.name}
+            self.entries[game_name].roms[rom.name] = rom
+    def AddGame(self, game):
+        if isinstance(game, RedumpGame) and game.name not in self.entries:
+            self.entries[game.name] = game
+            for rom in game.roms.values():
+                ext = rom.GetExt()
+                if ext is not None and ext.strip() != '' and ext not in self.allowed_extensions:
+                    self.allowed_extensions.append(ext)
+                self.sha1_list[rom.sha1] = {self.header.internal_name, game.name, rom.name}
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~ Program functions
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
 redump_dats = {}
 
 
@@ -189,64 +263,6 @@ for system in redump_source:
                     os.rename(os.path.join(dirpath, file_name), os.path.join(USER_CONFIG_DIR, 'dat', system + ".dat"))
         shutil.rmtree(temp_dat_dir)
 
-class RedumpRom:
-    def __init__(self, name, crc=None, md5=None, sha1=None):
-        self.name = name
-        self.crc = crc
-        self.md5 = md5
-        self.sha1 = sha1
-    def GetExt(self):
-        filename, file_extension = os.path.splitext(self.name)
-        return file_extension
-
-
-class RedumpGame:
-    def __init__(self, name, category=None, system=None):
-        self.name = name
-        self.category = category
-        self.system = system
-        self.complete = False
-        self.filename_missmatched = False
-        self.roms = {}
-        self.filename_missmatched_sha1 = []
-        self.matched_roms = {}
-    def AddRom(self, rom):
-        if isinstance(rom, RedumpRom) and rom.name not in self.roms:
-            self.roms[rom.name] = rom
-    
-
-
-class RedumpDat:
-    def __init__(self, name, internal_name=None, version=None, date=None, author=None, homepage=None, url=None):
-        self.header = type('', (), {})()
-        self.header.name = name
-        self.header = type('', (), {})()
-        self.header.name = name
-        self.header.internal_name = internal_name if internal_name is not None else name
-        self.header.version = version
-        self.header.date = date
-        self.header.author = author
-        self.header.homepage = homepage
-        self.header.url = url
-        self.entries = {}
-        self.allowed_extensions = []
-        self.sha1_list = {}
-    def AddRom(self, game_name, rom):
-        if isinstance(rom, RedumpRom) and game_name in self.entries and rom.name not in self.entries[game_name].roms:
-            ext = rom.GetExt()
-            if ext is not None and ext.strip() != '' and ext not in self.allowed_extensions:
-                self.allowed_extensions.append(ext)
-            self.sha1_list[rom.sha1] = {self.header.internal_name, game_name, rom.name}
-            self.entries[game_name].roms[rom.name] = rom
-    def AddGame(self, game):
-        if isinstance(game, RedumpGame) and game.name not in self.entries:
-            self.entries[game.name] = game
-            for rom in game.roms.values():
-                ext = rom.GetExt()
-                if ext is not None and ext.strip() != '' and ext not in self.allowed_extensions:
-                    self.allowed_extensions.append(ext)
-                self.sha1_list[rom.sha1] = {self.header.internal_name, game.name, rom.name}
-
 def read_redump_file(dat_file, system_name=None):
     xml = root = ET.parse(dat_file).getroot()
     name = xml.find('header/name').text
@@ -274,18 +290,24 @@ def read_redump_file(dat_file, system_name=None):
     dat_list.allowed_extensions = [ext for ext in dat_list.allowed_extensions]
     return dat_list, dat_list.allowed_extensions, dat_list.sha1_list
 
-        
-# Read redump.org dats
-for (dirpath, dirnames, filenames) in os.walk(os.path.join(USER_CONFIG_DIR, 'dat')):
-    for file_name in filenames:
-        print("~~ Loading datfiles [{}]       ~~".format(progress[i]), end='\r', flush=True)
-        i = i+1 if i+1 < len(progress) else 0
-        system_name = file_name[:-4]
-        abbrv=None
-        abbrv=[abbreviations for abbreviations in system_abbreviations if system_abbreviations[abbreviations] == system_name]
-        if system_name in redump_source and len(abbrv) == 1:
-            dat_list, allowed_extensions, sha1_list = read_redump_file(os.path.join(dirpath, file_name), system_name)
-            redump_dats[abbrv[0]] = {'dat_list': dat_list, 'allowed_extensions': allowed_extensions, 'sha1_list': sha1_list}
+
+def get_redump_dats():
+    if  len(redump_dats) == 0:
+        i = 0
+        # Read redump.org dats
+        for (dirpath, dirnames, filenames) in os.walk(os.path.join(USER_CONFIG_DIR, 'dat')):
+            for file_name in filenames:
+                print("~~ Loading datfiles [{}]       ~~".format(progress[i]), end='\r', flush=True)
+                i = i+1 if i+1 < len(progress) else 0
+                system_name = file_name[:-4]
+                abbrv=None
+                abbrv=[abbreviations for abbreviations in system_abbreviations if system_abbreviations[abbreviations] == system_name]
+                if system_name in redump_source and len(abbrv) == 1:
+                    dat_list, allowed_extensions, sha1_list = read_redump_file(os.path.join(dirpath, file_name), system_name)
+                    redump_dats[abbrv[0]] = {'dat_list': dat_list, 'allowed_extensions': allowed_extensions, 'sha1_list': sha1_list}
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~", flush=True)
+    return redump_dats
+
 
 def get_game_by_name(game_name):
     return dat_list.get(game_name)
@@ -402,29 +424,53 @@ def check_roms(roms_folder, dat_list, allowed_extensions, sha1_list, recursive =
 # ~~ CMD Functions
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+def get_dat_list(dat_file):
+    dat_list = None
+    try:
+        if dat_file is not None and dat_file in system_abbreviations:
+            dat_list = get_redump_dats()[dat_file]['dat_list']
+        elif dat_file is not None:
+            dat_list, allowed_extensions, sha1_list = read_redump_file(dat_file)
+        else:
+            mixed = RedumpDat('Mixed','Mixed')
+            for redump_dat in get_redump_dats().values():
+                games = [game for game in redump_dat['dat_list'].entries.values()]
+                for game in games:
+                    game.name += "({})".format(game.system)
+                    mixed.AddGame(game)
+            dat_list = mixed
+    except Exception as e:
+        print(e)
+    return dat_list
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~ Check a given directory for games
+# ~~ in a datfile. The datfile is either
+# ~~ all datfiles from redump.org, a 
+# ~~ system abbreviation or a custom 
+# ~~ datfile provided by the user
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Args:
+# - rom_folder: Folder to check
+# - dat_file: Either None for all default
+#             redump datfiles, a system
+#             abbreviation for a default
+#             redump system or a custom
+#             path to a datfile
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def check(roms_folder, dat_file):
+    dat_list = get_dat_list(dat_file)
     if roms_folder is None:
-        print("~~~ ERROR ~~~")
+        print("~~~ ERROR ~~~                                                        ")
         print("Please specifiy a folder to be checked")
         help(1)
-    redump_lists = redump_dats
-    check_cmd = {}
-    if dat_file is not None and dat_file in system_abbreviations:
-        check_cmd = redump_dats[dat_file]
-        check_cmd['roms_folder'] = roms_folder
-    elif dat_file is not None and dat_file.endswith('.cue'):
-        dat_list, allowed_extensions, sha1_list = read_redump_file(dat_file)
-        check_cmd = {'dat_list': dat_list, 'allowed_extensions': allowed_extensions, 'sha1_list': sha1_list, 'roms_folder': roms_folder}
-    else:
-        mixed = RedumpDat('Mixed','Mixed')
-        for redump_dat in redump_dats.values():
-            games = [game for game in redump_dat['dat_list'].entries.values()]
-            for game in games:
-                game.name += "({})".format(game.system)
-                mixed.AddGame(game)
-        check_cmd = {'dat_list': mixed, 'allowed_extensions': mixed.allowed_extensions, 'sha1_list': mixed.sha1_list, 'roms_folder': roms_folder}
+    if dat_list is None:
+        print("~~~ ERROR ~~~                                                        ")
+        print("The given Argument {} is not a valid system abbreviation or valid custom datfile".format(dat_file))
+        help(1)
+    check_cmd = {'dat_list': dat_list, 'allowed_extensions': dat_list.allowed_extensions, 'sha1_list': dat_list.sha1_list, 'roms_folder': roms_folder}
     complete_games, incomplete_games, unknown_roms = check_roms(**check_cmd)
-    # Output ROm List
+    # Output complete game list
     print()
     print('Complete Games:')
     # Sort games by category
@@ -443,7 +489,7 @@ def check(roms_folder, dat_file):
             if game.filename_missmatched:
                 [print('   * Filename missmatch, DAT Entry: \'{}\', Local File: \'{}\''.format(game.game_rom_sha1[sha1].name, game.matched_rom_sha1[sha1])) for sha1 in game.filename_missmatched_sha1]
         print()
-
+    # Print out incomplete games
     if len(incomplete_games) > 0:
         categories_incomplete = {}
         for game in incomplete_games:
@@ -462,6 +508,16 @@ def check(roms_folder, dat_file):
         print()
     print('----{}---'.format("".ljust(pad_c, '-')))
 
+def list():
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+    print("~~ List of avalable systems     ~~")
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+    pad = max([len(system) for system in system_abbreviations])
+    for system in system_abbreviations:
+        print(" {} - {}".format((system).ljust(pad), system_abbreviations[system]))
+    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+
+
 def help(exit_val):
     print('~~~ Help  ~~~')
     print('Use one of the  following arguments to use this tool:')
@@ -469,14 +525,14 @@ def help(exit_val):
     print()
     print('  redump check /path/to/collection')
     print()
-    print('To check only for a specific system use either a system abbreviation (see redump list system) or provide an own dat file:')
+    print('To check only for a specific system use either a system abbreviation (see redump list) or provide an own dat file:')
     print()
     print('  redump check /path/to/collection psx')
     print('  redump check /path/to/collection /path/to/datfile/psx.dat')
     print()
     print('To list all available system use the following command:')
     print()
-    print('  redump list system')
+    print('  redump list')
     print()
     print('To reorg your collection use the following command. The reorganization will')
     print()
@@ -492,11 +548,12 @@ def help(exit_val):
 
     exit(exit_val if not isinstance(exit_val, str) else 1)
 
-CMD = {'check': check, 'help': help}
+CMD = {'check': check, 'help': help, 'list': list}
 CMD_ARGS = {
     'check': {'roms_folder': None, 'dat_file': None}, 
     'help': {'exit_val': 0},
-    'reorg': {}
+    'reorg': {},
+    'list': {}
 }
 
 if len(sys.argv) < 2:
