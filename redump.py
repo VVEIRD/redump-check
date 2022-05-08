@@ -541,6 +541,15 @@ def check(roms_folder, dat_file):
             for game in categories_incomplete[category]:
                 print('- {} ({})'.format(game.name.replace("({})".format(game.system), ''), game.complete))
         print()
+    # Print out unknown roms
+    if len(unknown_roms) > 0:
+        pad_i = max([len(rom) for rom in unknown_roms])
+        pad_i = pad_i if pad_i > pad_c else pad_c
+        print()
+        print('Unknown ROMs:')
+        # Show incomplete games by system
+        for rom in unknown_roms:
+            print('- {} ({})'.format(rom, unknown_roms[rom]))
     print('----{}---'.format("".ljust(pad_c, '-')))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -633,7 +642,7 @@ def reorg(source_folder, target_folder, dst):
         categories[game.system][re.sub('\(Disc [0-9]{1,3}\).*', '', game.name).strip()].append(game)
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     print("~~ Moving found games           ~~")
-    pad_c = max([len(category) for category in categories])
+    pad_c = max([len(category) for category in categories]) if len(categories) > 0 else 0
     for category in categories:
         print('--- {}---'.format(category + " " + "".ljust(pad_c-len(category), '-')))
         if not os.path.isdir(os.path.join(target_folder, category)):
@@ -660,13 +669,23 @@ def reorg(source_folder, target_folder, dst):
                      for rom in game.roms.values():
                          m3u_files.append('/'.join([game.name, rom.name]))
             m3u_files = OrderedDict.fromkeys(m3u_files).keys()
-            log('INFO', game_name, 'M3U', 'Creating M3U Playlist \'{}\''.format(game_name + ".m3u"))
-            print(' * Creating M3U Playlist \'{}\''.format(game_name + ".m3u"))
+            log('INFO', game_name, 'M3U', 'Creating M3U Playlist \'{}\''.format(os.path.join(target_folder, category, game_name + ".m3u")))
+            print(' * Creating M3U Playlist \'{}\''.format(os.path.join(target_folder, category, game_name + ".m3u")))
             with open(os.path.join(target_folder, category, game_name + ".m3u"), 'w', encoding="utf8") as m3u:
                 m3u.write("#EXTM3U\n")
                 m3u.write("#EXTENC: UTF-8\n")
                 for m3u_file in m3u_files:
                     m3u.write(m3u_file + "\n")
+    # Print out unknown roms
+    if len(unknown_roms) > 0:
+        pad_i = max([len(rom) for rom in unknown_roms])
+        pad_i = pad_i if pad_i > pad_c else pad_c
+        print()
+        print('Unknown ROMs:')
+        # Show incomplete games by system
+        for rom in unknown_roms:
+            print('- {} ({})'.format(rom, unknown_roms[rom]))
+            log('INFO', 'HASHING', 'ROM', 'Unknown ROM: {} ({})'.format(rom, unknown_roms[rom]))
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     print('Done')
 
