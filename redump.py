@@ -167,9 +167,7 @@ class RedumpGame:
         self.system = system
         self.complete = False
         self.roms = {}
-        # TODO: This needs to hold filename: RedumpRom(filename, sha1)
         self.matched_roms = {}
-        # TODO: This must go
     def AddRom(self, rom):
         if isinstance(rom, RedumpRom) and rom.name not in self.roms:
             self.roms[rom.name] = rom
