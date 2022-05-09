@@ -152,9 +152,12 @@ class RedumpRom:
         self.crc = crc
         self.md5 = md5
         self.sha1 = sha1
+        self.matched_rom = None
     def GetExt(self):
         filename, file_extension = os.path.splitext(self.name)
         return file_extension
+    def HasFilenameMissmatch(self):
+        return False if self.matched_rom is None or os.path.basename(self.matched_rom.name) == self.name else True
 
 
 class RedumpGame:
@@ -163,25 +166,45 @@ class RedumpGame:
         self.category = category
         self.system = system
         self.complete = False
-        self.filename_missmatched = False
         self.roms = {}
-        self.filename_missmatched_sha1 = []
+        # TODO: This needs to hold filename: RedumpRom(filename, sha1)
         self.matched_roms = {}
-        self.matched_rom_sha1 = {}
+        # TODO: This must go
     def AddRom(self, rom):
         if isinstance(rom, RedumpRom) and rom.name not in self.roms:
             self.roms[rom.name] = rom
+    def AddMatchedRom(self, rom):
+        if isinstance(rom, RedumpRom) and rom.name not in self.matched_roms:
+            self.matched_roms[rom.name] = rom
     def GetFileCount(self):
         return len(self.roms)
+    def HasFilenameMissmatch(self):
+        res = False
+        for rom in self.roms.values():
+            if rom.HasFilenameMissmatch():
+                res = True
+                break
+        return res
+    def GetMissnamedRoms(self):
+        res = []
+        for rom in self.roms.values():
+            if rom.HasFilenameMissmatch():
+                res.append(rom)
+        return res
     def GetCueFile(self):
         cueFile = None
         for rom in self.roms.values():
             if rom.GetExt() == '.cue':
                 cueFile = rom
         return cueFile
-    # Returns full file path of matched rom
+    # Returns full file path of matched rom, TODO: must be based on matched_roms
     def GetMatchedRomByHash(self, sha1):
-        return self.matched_rom_sha1.get(sha1)
+        foundRom = None
+        for rom in self.matched_roms.values():
+            if rom.sha1 == sha1:
+                foundRom = rom
+                break
+        return foundRom
     
 class RedumpDat:
     def __init__(self, name, internal_name=None, version=None, date=None, author=None, homepage=None, url=None):
@@ -197,13 +220,11 @@ class RedumpDat:
         self.header.url = url
         self.entries = {}
         self.allowed_extensions = []
-        self.sha1_list = {}
     def AddRom(self, game_name, rom):
         if isinstance(rom, RedumpRom) and game_name + "({})".format(self.system) in self.entries and rom.name not in self.entries[game_name + "({})".format(self.system)].roms:
             ext = rom.GetExt()
             if ext is not None and ext.strip() != '' and ext not in self.allowed_extensions:
                 self.allowed_extensions.append(ext)
-            self.sha1_list[rom.sha1] = {self.header.internal_name, game_name, rom.name}
             self.entries[game_name].roms[rom.name] = rom
     def AddGame(self, game):
         if isinstance(game, RedumpGame) and game.name + "({})".format(game.system) not in self.entries:
@@ -212,7 +233,6 @@ class RedumpDat:
                 ext = rom.GetExt()
                 if ext is not None and ext.strip() != '' and ext not in self.allowed_extensions:
                     self.allowed_extensions.append(ext)
-                self.sha1_list[rom.sha1] = {self.header.internal_name, game.name, rom.name}
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -301,7 +321,7 @@ def read_redump_file(dat_file, system_name=None):
             game.AddRom(rom)
         dat_list.AddGame(game)
     dat_list.allowed_extensions = [ext for ext in dat_list.allowed_extensions]
-    return dat_list, dat_list.allowed_extensions, dat_list.sha1_list
+    return dat_list, dat_list.allowed_extensions
 
 
 def get_redump_dats():
@@ -316,20 +336,10 @@ def get_redump_dats():
                 abbrv=None
                 abbrv=[abbreviations for abbreviations in system_abbreviations if system_abbreviations[abbreviations] == system_name]
                 if system_name in redump_source and len(abbrv) == 1:
-                    dat_list, allowed_extensions, sha1_list = read_redump_file(os.path.join(dirpath, file_name), system_name)
-                    redump_dats[abbrv[0]] = {'dat_list': dat_list, 'allowed_extensions': allowed_extensions, 'sha1_list': sha1_list}
+                    dat_list, allowed_extensions = read_redump_file(os.path.join(dirpath, file_name), system_name)
+                    redump_dats[abbrv[0]] = {'dat_list': dat_list, 'allowed_extensions': allowed_extensions}
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~", flush=True)
     return redump_dats
-
-
-def get_game_by_name(game_name):
-    return dat_list.get(game_name)
-
-def get_game_by_hash(hash):
-    if sha1_list.get(hash) is not None:
-        return dat_list.get(sha1_list.get(hash)[0])
-    else:
-        return None
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -362,9 +372,8 @@ def hash_file(file_name):
 
 
 
-def check_roms(roms_folder, dat_list, allowed_extensions=None, sha1_list=None, recursive = True):
+def check_roms(roms_folder, dat_list, allowed_extensions=None, recursive = True):
     allowed_extensions = dat_list.allowed_extensions
-    sha1_list = dat_list.sha1_list
     try:
         print("~~           Settings           ~~")
         print("~~ Using datfile for system: {}".format(dat_list.header.name))
@@ -378,6 +387,8 @@ def check_roms(roms_folder, dat_list, allowed_extensions=None, sha1_list=None, r
         log('INFO', 'CONFIG', 'NONE', 'Allowed Extensions: {}'.format(', '.join(allowed_extensions)))
         log('INFO', 'CONFIG', 'NONE', 'Recursive: {}'.format("Yes" if recursive else "No"))
         rom_list = {}
+        rom_dups = {}
+        used_roms = []
         # Find all rom files
         for (dirpath, dirnames, filenames) in os.walk(roms_folder):
             if recursive or dirpath == roms_folder:
@@ -385,6 +396,7 @@ def check_roms(roms_folder, dat_list, allowed_extensions=None, sha1_list=None, r
                     if file[-4:] in allowed_extensions:
                         game_name = re.sub(' \(Track [0-9]{1,3}\)', '', file)
                         rom_list[os.path.join(dirpath, file)] = ''
+                        rom_dups[os.path.join(dirpath, file)] = 0
         # Check file hashes of known files
         print("Checking Files:")
         LJUST = max([len(a) for a in rom_list])
@@ -395,26 +407,36 @@ def check_roms(roms_folder, dat_list, allowed_extensions=None, sha1_list=None, r
             print('Hashing file - {}'.format(rom_file.ljust(LJUST)), end = '', flush=True)
             print(' - SHA1: {}'.format(sha1))
             rom_list[rom_file] = sha1
+        # Mark duplicates
+        duped_hashes = {rom_list[file]: [] for file in rom_list}
+        for file in rom_list:
+            duped_hashes[rom_list[file]].append(file)
         # Match files to games
         matched_games = []
-        matched_roms = []
+        matched_roms = {}
         for game_name in dat_list.entries:
             game = dat_list.entries[game_name]
             # List of sha1 hahs of the roms
             game.game_rom_sha1 = {rom.sha1: rom for rom in game.roms.values()}
             # Match hashed files to list of game roms
-            game.matched_roms = {file: rom_list[file] for file in rom_list if rom_list[file] in game.game_rom_sha1}
-            game.matched_rom_sha1 = {rom_list[file]: file for file in rom_list if rom_list[file] in game.game_rom_sha1}
-            matched_roms += game.matched_roms
+            for rom in game.roms.values():
+                mrom = [RedumpRom(name=file, sha1=rom_list[file]) for file in rom_list if rom_list[file] == rom.sha1 and file not in used_roms]
+                mrom = mrom[0] if len(mrom) > 0 else None
+                if mrom is not None:
+                    rom.matched_rom = mrom
+                    game.matched_roms[mrom.name] = mrom
+                    used_roms.append(mrom.name)
+            matched_roms = {**matched_roms, **game.matched_roms}
+            # matched_roms += game.matched_roms
+            for rom in game.matched_roms:
+                rom_dups[rom] += 1
             # For one or mor hits
             if len(game.matched_roms) > 0:
                 game.complete = True if len(game.matched_roms) == len(game.roms) else False
                 matched_games.append(game)
-            # Find File Name Missmatch
-            for sha1 in game.matched_rom_sha1:
-                if game.game_rom_sha1[sha1].name != os.path.basename(game.matched_rom_sha1[sha1]):
-                    game.filename_missmatched = True
-                    game.filename_missmatched_sha1.append(sha1)
+            # Remove incomplete roms from blacklist
+            if not game.complete:
+                [used_roms.remove(rom.name) for rom in game.matched_roms.values()]
 
         complete_games = [game for game in matched_games if game.complete]
         incomplete_games = [game for game in matched_games if not game.complete]
@@ -465,7 +487,7 @@ def get_dat_list(dat_file):
         if dat_file is not None and dat_file in system_abbreviations:
             dat_list = get_redump_dats()[dat_file]['dat_list']
         elif dat_file is not None:
-            dat_list, allowed_extensions, sha1_list = read_redump_file(dat_file)
+            dat_list, allowed_extensions = read_redump_file(dat_file)
         elif dat_file is None or dat_file == 'all':
             mixed = RedumpDat('Mixed','Mixed')
             for redump_dat in get_redump_dats().values():
@@ -503,7 +525,7 @@ def check(roms_folder, dat_file):
         print("~~~ ERROR ~~~                                                        ")
         print("The given Argument {} is not a valid system abbreviation or valid custom datfile".format(dat_file))
         help(1)
-    check_cmd = {'dat_list': dat_list, 'allowed_extensions': dat_list.allowed_extensions, 'sha1_list': dat_list.sha1_list, 'roms_folder': roms_folder}
+    check_cmd = {'dat_list': dat_list, 'allowed_extensions': dat_list.allowed_extensions, 'roms_folder': roms_folder}
     complete_games, incomplete_games, unknown_roms = check_roms(**check_cmd)
     # Output complete game list
     print()
@@ -519,10 +541,12 @@ def check(roms_folder, dat_file):
     for category in categories_complete:
         print('--- {}---'.format(category + " " + "".ljust(pad_c-len(category), '-')))
         for game in categories_complete[category]:
-            print('  {} ({})'.format(game.name.replace("({})".format(game.system), ''), 'Warning' if  game.filename_missmatched else 'Ok'))
+            print('  {} ({})'.format(game.name.replace("({})".format(game.system), ''), 'Warning' if  game.HasFilenameMissmatch() else 'Ok'))
             log('INFO', game.name, 'GAME', 'All file present')
-            if game.filename_missmatched:
-                [print('   * Filename missmatch, DAT Entry: \'{}\', Local File: \'{}\''.format(game.game_rom_sha1[sha1].name, game.matched_rom_sha1[sha1])) for sha1 in game.filename_missmatched_sha1]
+            # Show missnamed files
+            if game.HasFilenameMissmatch():
+                for missmatched_rom in game.GetMissnamedRoms():
+                    print('   * Filename missmatch, DAT Entry: \'{}\', Local File: \'{}\''.format(missmatched_rom.name, missmatched_rom.matched_rom.name))
         print()
     # Print out incomplete games
     if len(incomplete_games) > 0:
@@ -653,7 +677,7 @@ def reorg(source_folder, target_folder, dst):
                 if not os.path.isdir(os.path.join(target_folder, category, game.name)):
                     os.makedirs(os.path.join(target_folder, category, game.name))
                 for rom in game.roms.values():
-                    source_file = game.GetMatchedRomByHash(rom.sha1)
+                    source_file = rom.matched_rom.name
                     target_file = os.path.join(target_folder, category, game.name, rom.name)
                     print(' * Moving \'{}\' to \'{}\''.format(source_file, target_file))
                     os.rename(source_file, target_file)
