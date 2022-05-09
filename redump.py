@@ -388,6 +388,7 @@ def check_roms(roms_folder, dat_list, allowed_extensions=None, recursive = True)
         log('INFO', 'CONFIG', 'NONE', 'Recursive: {}'.format("Yes" if recursive else "No"))
         rom_list = {}
         rom_dups = {}
+        # Blacklist to not reuse roms, that where already matched
         used_roms = []
         # Find all rom files
         for (dirpath, dirnames, filenames) in os.walk(roms_folder):
